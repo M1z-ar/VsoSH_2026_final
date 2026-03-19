@@ -20,7 +20,7 @@ class Vt:
     async def get_session(self) -> aiohttp.ClientSession:
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=120),
+                timeout=aiohttp.ClientTimeout(total=30, connect=10, sock_read=20),
                 headers={"x-apikey": self.api_key},
             )
         return self.session
@@ -46,28 +46,46 @@ class Vt:
             async with session.request(method, url, **kwargs) as resp:
                 if resp.status == 429:
                     raise RateError("VirusTotal rate limit")
+
+                if resp.status == 409:
+                    body = await resp.text()
+                    raise TempError(f"VirusTotal temporary conflict {resp.status}: {body}")
+
                 if resp.status >= 500:
                     raise TempError(f"VirusTotal server error {resp.status}")
+
                 if resp.status >= 400:
                     raise FatalError(f"VirusTotal error {resp.status}: {await resp.text()}")
+
                 return await resp.json()
+
         except asyncio.TimeoutError as err:
             raise TempError("VirusTotal timeout") from err
         except aiohttp.ClientError as err:
             raise TempError(f"VirusTotal network error: {err}") from err
 
     async def wait_report(self, analysis_id: str) -> dict[str, Any]:
+        if not analysis_id:
+            raise TempError("VirusTotal analysis id is empty")
+
         for _ in range(config.app.vt_wait_cycles):
             data = await self.request("GET", f"analyses/{analysis_id}")
             status = data.get("data", {}).get("attributes", {}).get("status")
+
             if status == "completed":
                 return data
+
             await asyncio.sleep(config.app.vt_poll_delay)
+
         raise TempError("VirusTotal analysis timeout")
 
     async def scan_url(self, url: str) -> dict[str, Any]:
         sent = await self.request("POST", "urls", data={"url": url})
         analysis_id = sent.get("data", {}).get("id")
+
+        if not analysis_id:
+            raise TempError(f"VirusTotal submit url: empty analysis id: {sent}")
+
         await self.wait_report(analysis_id)
 
         vt_id = base64.urlsafe_b64encode(url.encode()).decode().strip("=")
@@ -79,20 +97,23 @@ class Vt:
 
         sent = await self.request("POST", "files", data=form)
         analysis_id = sent.get("data", {}).get("id")
-        return await self.wait_report(analysis_id)
 
+        if not analysis_id:
+            raise TempError(f"VirusTotal submit file: empty analysis id: {sent}")
+
+        return await self.wait_report(analysis_id)
 
 
 def get_stats(data: dict[str, Any]) -> dict[str, int]:
     attrs = data.get("data", {}).get("attributes", {})
     stats = attrs.get("stats") or attrs.get("last_analysis_stats") or {}
+
     return {
         "malicious": int(stats.get("malicious", 0) or 0),
         "suspicious": int(stats.get("suspicious", 0) or 0),
         "harmless": int(stats.get("harmless", 0) or 0),
         "undetected": int(stats.get("undetected", 0) or 0),
     }
-
 
 
 def make_verdict(data: dict[str, Any], *, is_url: bool) -> dict[str, Any]:
@@ -130,8 +151,7 @@ def make_verdict(data: dict[str, Any], *, is_url: bool) -> dict[str, Any]:
     }
 
 
-
-def view(result: dict[str, Any]) -> str:
+def view(result: dict) -> str:
     stats = result["stats"]
     lines = [f"VirusTotal: {result['label']}"]
     lines.append(f"— вредоносных: {stats['malicious']}")
