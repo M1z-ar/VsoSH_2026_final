@@ -30,13 +30,11 @@ queue: asyncio.Queue[Job] = asyncio.Queue()
 workers_started = False
 
 
-
 def find_url(text: str) -> str | None:
     match = url_re.search(text)
     if not match:
         return None
     return match.group(0).rstrip(".,;!?)\"'")
-
 
 
 def get_file_info(msg) -> tuple[int, str] | None:
@@ -51,15 +49,21 @@ def get_file_info(msg) -> tuple[int, str] | None:
     return None
 
 
-
 def can_enqueue(msg) -> bool:
     text = msg.text or msg.caption or ""
     return bool(find_url(text) or get_file_info(msg))
 
 
-
 def title_line(title: str, value: str) -> str:
     return f"{title}: {value}"
+
+
+# --- ДОБАВЛЕНО ---
+def format_size(num_bytes: int) -> str:
+    if num_bytes < 1024 * 1024:
+        return f"{num_bytes / 1024:.1f} КБ"
+    return f"{num_bytes / (1024 * 1024):.1f} МБ"
+# -----------------
 
 
 async def scan_url_in_vt(url: str) -> dict:
@@ -75,7 +79,6 @@ async def scan_file_in_vt(file_bytes: bytes, file_name: str) -> dict:
 async def scan_file_in_hybrid(file_bytes: bytes, file_name: str) -> dict:
     data = await hybrid.scan_file(file_bytes, file_name)
     return hybrid_verdict(data)
-
 
 
 def render_result(result: dict) -> str:
@@ -95,7 +98,11 @@ async def scan_url_flow(url: str, status_msg) -> None:
             if result.get("hit"):
                 lines.append("Safe Browsing: ссылка есть в базе")
                 lines.append("Итог: ⚠️ Опасно")
-                await status_msg.edit_text("\n".join(lines), disable_web_page_preview=True)
+                await status_msg.edit_text(
+                    "\n".join(lines),
+                    disable_web_page_preview=True,
+                    parse_mode=None,
+                )
                 return
             lines.append("Safe Browsing: ничего не нашёл")
         except RateError:
@@ -110,7 +117,11 @@ async def scan_url_flow(url: str, status_msg) -> None:
             if result.get("hit"):
                 lines.append("URLhaus: ссылка есть в базе")
                 lines.append("Итог: ⚠️ Опасно")
-                await status_msg.edit_text("\n".join(lines), disable_web_page_preview=True)
+                await status_msg.edit_text(
+                    "\n".join(lines),
+                    disable_web_page_preview=True,
+                    parse_mode=None,
+                )
                 return
             lines.append("URLhaus: ничего не нашёл")
         except RateError:
@@ -129,8 +140,12 @@ async def scan_url_flow(url: str, status_msg) -> None:
         lines.append("VirusTotal: ошибка")
 
     lines.append(config.DONE)
-    await status_msg.edit_text("\n\n".join(lines), disable_web_page_preview=True)
 
+    await status_msg.edit_text(
+        "\n\n".join(lines),
+        disable_web_page_preview=True,
+        parse_mode=None,
+    )
 
 
 def file_mode(file_size: int) -> str:
@@ -196,7 +211,7 @@ async def scan_archive_flow(file_name: str, file_bytes: bytes, status_msg) -> bo
         return False
 
     if not config.app.archives_enabled:
-        await status_msg.edit_text(config.ERR_ARCHIVES_OFF)
+        await status_msg.edit_text(config.ERR_ARCHIVES_OFF, parse_mode=None)
         return True
 
     unpacked = None
@@ -215,9 +230,11 @@ async def scan_archive_flow(file_name: str, file_bytes: bytes, status_msg) -> bo
                 [
                     title_line("Архив", file_name),
                     f"Файлов внутри: {len(unpacked.files)}",
-                    f"Общий размер: {round(unpacked.total_bytes / (1024 * 1024), 1)} МБ",
+                    f"Общий размер: {format_size(unpacked.total_bytes)}\n"
+                    "Проверяю архив...",
                 ]
-            )
+            ),
+            parse_mode=None,
         )
 
         for path in unpacked.files:
@@ -227,20 +244,20 @@ async def scan_archive_flow(file_name: str, file_bytes: bytes, status_msg) -> bo
 
             result_lines = await scan_one_file(inner_bytes, inner_name)
             result_lines.append(config.DONE)
-            await status_msg.reply_text("\n\n".join(result_lines))
+            await status_msg.reply_text("\n\n".join(result_lines), parse_mode=None)
 
-        await status_msg.edit_text(config.DONE)
+        await status_msg.edit_text(config.DONE, parse_mode=None)
         return True
 
     except InputError as err:
-        await status_msg.edit_text(f"Архив не принят: {err}")
+        await status_msg.edit_text(f"Архив не принят: {err}", parse_mode=None)
         return True
     except TempError as err:
-        await status_msg.edit_text(f"Не получилось распаковать архив: {err}")
+        await status_msg.edit_text(f"Не получилось распаковать архив: {err}", parse_mode=None)
         return True
     except Exception as err:
         config.log.exception("archive error: %s", err)
-        await status_msg.edit_text(config.ERR_FAIL)
+        await status_msg.edit_text(config.ERR_FAIL, parse_mode=None)
         return True
     finally:
         if unpacked:
@@ -257,18 +274,19 @@ async def scan_file_flow(client, msg, status_msg) -> None:
     if file_size > config.app.max_file_size:
         size_mb = max(1, round(file_size / (1024 * 1024)))
         await status_msg.edit_text(
-            config.ERR_SIZE.format(size_mb=size_mb, max_mb=config.app.max_file_mb)
+            config.ERR_SIZE.format(size_mb=size_mb, max_mb=config.app.max_file_mb),
+            parse_mode=None,
         )
         return
 
-    await status_msg.edit_text(config.WAIT_FILE)
+    await status_msg.edit_text(config.WAIT_FILE, parse_mode=None)
 
     try:
         file_obj = await client.download_media(msg, in_memory=True)
         file_bytes = file_obj.getvalue()
     except Exception as err:
         config.log.exception("download error: %s", err)
-        await status_msg.edit_text(config.ERR_FAIL)
+        await status_msg.edit_text(config.ERR_FAIL, parse_mode=None)
         return
 
     if await scan_archive_flow(file_name, file_bytes, status_msg):
@@ -276,26 +294,34 @@ async def scan_file_flow(client, msg, status_msg) -> None:
 
     result_lines = await scan_one_file(file_bytes, file_name)
     result_lines.append(config.DONE)
-    await status_msg.edit_text("\n\n".join(result_lines))
+
+    await status_msg.edit_text("\n\n".join(result_lines), parse_mode=None)
 
 
 async def handle_one(client, msg) -> None:
     text = msg.text or msg.caption or ""
     url = find_url(text)
-    status_msg = await msg.reply_text(config.WAIT)
+    status_msg = await msg.reply_text(config.WAIT, parse_mode=None)
 
-    if url:
-        await scan_url_flow(url, status_msg)
-        return
+    try:
+        if url:
+            await scan_url_flow(url, status_msg)
+            return
 
-    if get_file_info(msg):
-        await scan_file_flow(client, msg, status_msg)
-        return
+        if get_file_info(msg):
+            await scan_file_flow(client, msg, status_msg)
+            return
 
-    if msg.chat.type == ChatType.PRIVATE:
-        await status_msg.edit_text(config.ERR_EMPTY_PRIVATE)
-    else:
-        await status_msg.edit_text(config.ERR_EMPTY_GROUP)
+        if msg.chat.type == ChatType.PRIVATE:
+            await status_msg.edit_text(config.ERR_EMPTY_PRIVATE, parse_mode=None)
+        else:
+            await status_msg.edit_text(config.ERR_EMPTY_GROUP, parse_mode=None)
+    except Exception as err:
+        config.log.exception("handle_one error: %s", err)
+        try:
+            await status_msg.edit_text(config.ERR_FAIL, parse_mode=None)
+        except Exception:
+            pass
 
 
 async def worker(client, worker_num: int) -> None:
@@ -308,7 +334,6 @@ async def worker(client, worker_num: int) -> None:
             config.log.exception("worker %s: %s", worker_num, err)
         finally:
             queue.task_done()
-
 
 
 def start_workers(client) -> None:
@@ -325,4 +350,4 @@ def start_workers(client) -> None:
 
 async def enqueue(client, msg) -> None:
     await queue.put(Job(chat_id=msg.chat.id, msg_id=msg.id))
-    await msg.reply_text(config.QUEUED)
+    await msg.reply_text(config.QUEUED, parse_mode=None)
