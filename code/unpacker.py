@@ -24,7 +24,6 @@ class Unpacked:
     total_bytes: int
 
 
-
 def walk_files(root: str) -> list[str]:
     files: list[str] = []
     for current, _, names in os.walk(root):
@@ -33,11 +32,9 @@ def walk_files(root: str) -> list[str]:
     return files
 
 
-
 def is_archive(file_name: str) -> bool:
     name = (file_name or "").lower()
     return name.endswith(".zip") or name.endswith(".7z") or name.endswith(".rar")
-
 
 
 def extract_archive(
@@ -108,7 +105,6 @@ def extract_archive(
     except Exception:
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise
-
 
 
 def cleanup(unpacked: Unpacked) -> None:
