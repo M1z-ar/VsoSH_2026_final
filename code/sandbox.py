@@ -112,7 +112,6 @@ class Hybrid:
 def make_verdict(data: dict[str, Any]) -> dict[str, Any]:
     summary = data.get("summary", {}) or {}
     verdict = str(summary.get("verdict", "")).strip().lower()
-    threat_level = summary.get("threat_level")
     threat_score = summary.get("threat_score")
     tags = summary.get("tags") or []
     ml = summary.get("machine_learning_models") or []
@@ -132,8 +131,6 @@ def make_verdict(data: dict[str, Any]) -> dict[str, Any]:
             words.append(str(item))
 
     words.append(verdict)
-    if threat_level is not None:
-        words.append(str(threat_level))
     if threat_score is not None:
         words.append(str(threat_score))
 
@@ -155,7 +152,6 @@ def make_verdict(data: dict[str, Any]) -> dict[str, Any]:
         "level": level,
         "label": label,
         "verdict": summary.get("verdict"),
-        "threat_level": threat_level,
         "threat_score": threat_score,
         "tags": tags,
         "raw": data,
@@ -169,8 +165,6 @@ def view(result: dict[str, Any]) -> str:
     if result.get("verdict") is not None:
         lines.append(f"— вердикт: {result['verdict']}")
 
-    if result.get("threat_level") is not None:
-        lines.append(f"— уровень угрозы: {result['threat_level']}")
 
     if result.get("threat_score") is not None:
         lines.append(f"— оценка: {result['threat_score']} из 100")
